@@ -1,0 +1,21 @@
+{
+  "name": "freewill",
+  "private": true,
+  "workspaces": [
+    "client"
+  ],
+  "scripts": {
+    "dev:client": "npm run dev -w client",
+    "build:client": "npm run build -w client",
+    "dev:server": "cd server && python39 -m src.app",
+    "dev": "concurrently \"npm run dev:client\" \"npm run dev:server\"",
+    "install:all": "npm install && cd server && python39 -m pip install -r requirements.txt",
+    "test": "npm run test -w client",
+    "lint": "npm run lint -w client",
+    "clean": "rimraf node_modules client/node_modules client/dist"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2",
+    "rimraf": "^5.0.5"
+  }
+}
