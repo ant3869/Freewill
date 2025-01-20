@@ -37,18 +37,18 @@ class MetricsCollector:
     @staticmethod
     def get_token_metrics() -> dict:
         """Get token usage metrics."""
-        if not LLMEngine or LLMEngine.status != ModelStatus.READY:
-            return {
-                'current': 0,
-                'total': 0,
-                'limit': 2048
-            }
+        try:
+            if not hasattr(LLMEngine, "status") or LLMEngine.status != ModelStatus.READY:
+                return {'current': 0, 'total': 0, 'limit': 2048}
             
-        return {
-            'current': LLMEngine.current_tokens,
-            'total': LLMEngine.total_tokens,
-            'limit': LLMEngine.settings.get('max_tokens', 2048)
-        }
+            return {
+                'current': getattr(LLMEngine, 'current_tokens', 0),
+                'total': getattr(LLMEngine, 'total_tokens', 0),
+                'limit': LLMEngine.settings.get('max_tokens', 2048)
+            }
+        except Exception as e:
+            logger.error(f"Error in get_token_metrics: {str(e)}")
+            return {'current': 0, 'total': 0, 'limit': 2048}
     
     @staticmethod
     def get_response_time() -> float:

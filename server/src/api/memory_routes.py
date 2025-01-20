@@ -37,16 +37,23 @@ async def search_memories():
             'message': str(e)
         }), 500
 
-@memory_api.route('/api/memories/stats', methods=['GET'])
+@memory_api.route('/api/memory/stats', methods=['GET'])  # Corrected route path
 async def get_memory_stats():
     """Get memory statistics and visualization data."""
     try:
         time_range = request.args.get('timeRange', '7d')
         
-        # Get basic stats
-        stats = await memory_manager.get_stats()
+        # Validate time range
+        def validate_time_range(time_range):
+            valid_ranges = ['7d', 'last24hours', '30d']
+            if time_range not in valid_ranges:
+                raise ValueError(f"Invalid time range: {time_range}")
+            return time_range
+
+        time_range = validate_time_range(time_range)
         
-        # Get visualization data
+        # Fetch stats
+        stats = await memory_manager.get_stats()
         activity = await memory_manager.get_activity_data(time_range)
         types = await memory_manager.get_type_distribution()
         connections = await memory_manager.get_connection_stats()
@@ -63,9 +70,9 @@ async def get_memory_stats():
             }
         })
 
+    except ValueError as ve:
+        logger.error(f"Validation error: {str(ve)}")
+        return jsonify({'status': 'error', 'message': str(ve)}), 400
     except Exception as e:
         logger.error(f"Failed to get memory stats: {str(e)}")
-        return jsonify({
-            'status': 'error',
-            'message': str(e)
-        }), 500
+        return jsonify({'status': 'error', 'message': str(e)}), 500

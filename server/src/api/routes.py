@@ -32,18 +32,17 @@ async def start_model(validated_data):
     """Start and initialize the model."""
     global llm_engine
     try:
-        llm_engine = LLMEngine(validated_data.model_path)
+        if not llm_engine:
+            llm_engine = LLMEngine(validated_data.model_path)
+        
         if validated_data.settings:
             llm_engine.update_settings(validated_data.settings.dict())
         
         await llm_engine.initialize()
-        status = llm_engine.get_status()
-        
-        return status
-    
+        return llm_engine.get_status()
     except Exception as e:
         logger.error(f"Failed to start model: {str(e)}")
-        raise
+        return {"error": str(e)}, 500
 
 @api.route('/api/chat/send', methods=['POST'])
 @validate_request(ChatRequest, ChatResponse)

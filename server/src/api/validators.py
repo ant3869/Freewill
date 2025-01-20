@@ -40,7 +40,7 @@ def validate_request(request_model: Optional[Type] = None, response_model: Optio
                 error_response = ErrorResponse(
                     error="Validation Error",
                     code="VALIDATION_ERROR",
-                    details=e.errors(),
+                    details={'errors': e.errors()},  # Ensure dictionary format
                     timestamp=datetime.now()
                 )
                 return jsonify(error_response.dict()), 400
