@@ -38,9 +38,6 @@ htmlcov/
 client/dist
 client/build
 
-# Virtual environment
-venv/
-
 # Misc
 .DS_Store
 .env.local

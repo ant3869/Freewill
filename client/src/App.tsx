@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import { ChevronLeft, ChevronRight, Mic, PlayCircle, Square, Plus, MoreVertical, Edit2, Trash2, Save } from 'lucide-react';
 import MessageCard from './components/MessageCard';
 import MetricsBar from './components/MetricsBar';
@@ -8,6 +8,17 @@ import AutonomousInterface from './components/AutonomousInterface';
 import ApiService from './services/api';
 import logger from './services/logger';
 import DebugPanel from './components/DebugPanel';
+import React, { useEffect } from 'react';
+import { LoadingProvider } from './context/LoadingContext';
+import websocketClient from './services/websocket';
+import Chat from './components/Chat';
+import { useAsyncAction } from './hooks/useAsyncAction';
+import { LoadingSpinner } from './components/LoadingSpinner';
+import { ErrorMessage } from './components/ErrorMessage';
+
+import { ModelProvider, useModel } from './context/ModelContext';
+import ModelControlPanel from './components/ModelControlPanel';
+import { ModelStatus } from './types';
 
 type Mode = 'chat' | 'finetune' | 'autonomous';
 
@@ -31,6 +42,64 @@ interface Message {
   type: 'user' | 'assistant' | 'internal';
 }
 
+const MainContent: React.FC = () => {
+  const { state, updateSettings } = useModel();
+
+  if (!state.isInitialized) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-gray-900">
+        <div className="text-center space-y-4">
+          <LoadingSpinner />
+          <p className="text-gray-400">Initializing model...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (state.error) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-gray-900 p-4">
+        <ErrorMessage message={state.error} />
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col h-screen bg-gray-900 text-gray-100">
+      {/* Top Bar */}
+      <div className="h-12 bg-gray-800 border-b border-gray-700 flex items-center justify-between px-4">
+        <div className="flex items-center gap-2">
+          <span className="font-bold text-xl">DarkIdol LLM</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className={`px-2 py-1 rounded text-sm ${
+            state.status === ModelStatus.READY 
+              ? 'bg-green-900 text-green-300' 
+              : 'bg-yellow-900 text-yellow-300'
+          }`}>
+            {state.status}
+          </span>
+        </div>
+      </div>
+
+      {/* Main Content */}
+      <div className="flex-1 flex overflow-hidden">
+        {/* Chat Area */}
+        <div className="flex-1">
+          <Chat />
+        </div>
+
+        {/* Control Panel */}
+        <div className="w-80 border-l border-gray-700 overflow-y-auto">
+          <ModelControlPanel 
+            onSettingsChange={updateSettings}
+          />
+        </div>
+      </div>
+    </div>
+  );
+};
+
 function App() {
   const [mode, setMode] = useState<Mode>('chat');
   const [leftPanelCollapsed, setLeftPanelCollapsed] = useState(false);
@@ -40,7 +109,71 @@ function App() {
   const [editingChatId, setEditingChatId] = useState<string | null>(null);
   const [newMemoryTitle, setNewMemoryTitle] = useState('');
   const [newMemoryContent, setNewMemoryContent] = useState('');
+  const [memoryStats, setMemoryStats] = useState(null);
+  const [statsError, setStatsError] = useState<string | null>(null);
+  const [isFetchingStats, setIsFetchingStats] = useState(false);
   const [selectedChat, setSelectedChat] = useState<string | null>(null);
+  const { 
+    isLoading: isInitializing,
+    error: initError,
+    execute: initializeModel
+  } = useAsyncAction(ApiService.startModel);
+
+  // Fetch memory stats
+  const fetchMemoryStats = useCallback(async (timeRange: string) => {
+    setIsFetchingStats(true);
+    setStatsError(null);
+    try {
+      const stats = await ApiService.getMemoryStats(timeRange);
+      setMemoryStats(stats);
+      console.log('Fetched memory stats:', stats);
+    } catch (error) {
+      console.error('Error fetching memory stats:', error);
+      setStatsError('Failed to fetch memory stats.');
+    } finally {
+      setIsFetchingStats(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    // Initialize WebSocket
+    websocketClient.connect();
+
+    const initializeApp = async () => {
+      console.log('Initializing app...');
+      await fetchMemoryStats('last24hours'); // Fetch memory stats during initialization
+      initializeModel();
+    };
+
+    // Initialize model
+    initializeApp();
+
+    return () => {
+      websocketClient.disconnect();
+    };
+  }, [initializeModel]);
+
+  if (isInitializing) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-gray-900">
+        <div className="text-center space-y-4">
+          <LoadingSpinner />
+          <p className="text-gray-400">Initializing model...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (initError) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-gray-900 p-4">
+        <ErrorMessage 
+          message="Failed to initialize model. Please try again."
+          onRetry={() => initializeModel()}
+        />
+      </div>
+    );
+  }
 
   const [memories, setMemories] = useState<Memory[]>([
     {
@@ -305,306 +438,310 @@ function App() {
   };
 
   return (
-    <div className="flex flex-col h-screen bg-gray-900 text-gray-100">
-      {/* Top Navigation */}
-      <div className="h-12 bg-gray-800 border-b border-gray-700 flex items-center justify-between px-4">
-        <div className="flex items-center gap-2">
-          <span className="font-bold text-xl">DarkIdol LLM</span>
-        </div>
+    <LoadingProvider>
+      <ModelProvider>
+        <div className="flex flex-col h-screen bg-gray-900 text-gray-100">
+          {/* Top Navigation */}
+          <div className="h-12 bg-gray-800 border-b border-gray-700 flex items-center justify-between px-4">
+            <div className="flex items-center gap-2">
+              <span className="font-bold text-xl">DarkIdol LLM</span>
+            </div>
 
-        <div className="flex items-center gap-2">
-          <button 
-            onClick={() => setMode('chat')}
-            className={`px-4 py-1 rounded ${
-              mode === 'chat' ? 'bg-blue-600' : 'bg-gray-700 hover:bg-gray-600'
-            }`}
-          >
-            Chat Mode
-          </button>
-          <button 
-            onClick={() => setMode('finetune')}
-            className={`px-4 py-1 rounded ${
-              mode === 'finetune' ? 'bg-blue-600' : 'bg-gray-700 hover:bg-gray-600'
-            }`}
-          >
-            Fine-tune Mode
-          </button>
-          <button 
-            onClick={() => setMode('autonomous')}
-            className={`px-4 py-1 rounded ${
-              mode === 'autonomous' ? 'bg-blue-600' : 'bg-gray-700 hover:bg-gray-600'
-            }`}
-          >
-            Autonomous Mode
-          </button>
-        </div>
-
-        <div className="flex items-center gap-4">
-          <select className="bg-gray-700 rounded px-2 py-1">
-            <option>DarkIdol-Llama-3_1</option>
-          </select>
-          
-          <button 
-            onClick={() => setSystemRunning(!systemRunning)}
-            className={`flex items-center gap-2 px-3 py-1 rounded ${
-              systemRunning ? 'bg-red-600 hover:bg-red-700' : 'bg-green-600 hover:bg-green-700'
-            }`}
-          >
-            {systemRunning ? <Square size={16} /> : <PlayCircle size={16} />}
-            {systemRunning ? 'Stop' : 'Start'}
-          </button>
-        </div>
-      </div>
-
-      {/* Main Container */}
-      <div className="flex flex-1 overflow-hidden">
-        {mode !== 'autonomous' && (
-          <>
-            {/* Left Panel */}
-            <div className={`flex flex-col border-r border-gray-700 transition-all duration-300 ${
-              leftPanelCollapsed ? 'w-0' : 'w-80'
-            }`}>
-              {!leftPanelCollapsed && (
-                 <>
-                 <div className="h-1/2 border-b border-gray-700">
-                   <div className="p-2 bg-gray-800 text-white flex justify-between items-center">
-                     <span>Memory Bank</span>
-                     <button 
-                       onClick={handleAddMemory}
-                       className="p-1 hover:bg-gray-700 rounded"
-                     >
-                       <Plus size={16} />
-                     </button>
-                   </div>
-                   <div className="overflow-y-auto p-2 space-y-2">
-                     {memories.map(memory => (
-                       <div key={memory.id} className="bg-gray-800 rounded-lg overflow-hidden">
-                         {editingMemoryId === memory.id ? (
-                           <div className="p-3 space-y-2">
-                             <input
-                               type="text"
-                               value={newMemoryTitle || memory.title}
-                               onChange={(e) => setNewMemoryTitle(e.target.value)}
-                               className="w-full bg-gray-700 rounded px-2 py-1 text-sm"
-                               placeholder="Memory Title"
-                             />
-                             <textarea
-                               value={newMemoryContent || memory.content}
-                               onChange={(e) => setNewMemoryContent(e.target.value)}
-                               className="w-full bg-gray-700 rounded px-2 py-1 text-sm"
-                               rows={3}
-                               placeholder="Memory Content"
-                             />
-                             <div className="flex justify-end gap-2">
-                               <button
-                                 onClick={() => handleSaveMemory(memory.id)}
-                                 className="text-xs px-2 py-1 bg-blue-600 rounded hover:bg-blue-500"
-                               >
-                                 <Save size={12} />
-                               </button>
-                             </div>
-                           </div>
-                         ) : (
-                           <div className="p-3">
-                             <div className="flex justify-between items-start mb-1">
-                               <h3 className="font-medium">{memory.title}</h3>
-                               <div className="flex gap-1">
-                                 <button
-                                   onClick={() => {
-                                     setEditingMemoryId(memory.id);
-                                     setNewMemoryTitle(memory.title);
-                                     setNewMemoryContent(memory.content);
-                                   }}
-                                   className="p-1 hover:bg-gray-700 rounded"
-                                 >
-                                   <Edit2 size={12} />
-                                 </button>
-                                 <button
-                                   onClick={() => handleDeleteMemory(memory.id)}
-                                   className="p-1 hover:bg-gray-700 rounded text-red-500"
-                                 >
-                                   <Trash2 size={12} />
-                                 </button>
-                               </div>
-                             </div>
-                             <p className="text-sm text-gray-400 line-clamp-2">{memory.content}</p>
-                             <div className="text-xs text-gray-500 mt-1">{memory.timestamp}</div>
-                           </div>
-                         )}
-                       </div>
-                     ))}
-                   </div>
-                 </div>
-                 <div className="h-1/2">
-                   <div className="p-2 bg-gray-800 text-white flex justify-between items-center">
-                     <span>Chats</span>
-                     <div className="flex gap-1">
-                       <button
-                         onClick={handleAddChat}
-                         className="p-1 hover:bg-gray-700 rounded"
-                       >
-                         <Plus size={16} />
-                       </button>
-                       <button className="p-1 hover:bg-gray-700 rounded">
-                         <MoreVertical size={16} />
-                       </button>
-                     </div>
-                   </div>
-                   <div className="overflow-y-auto p-2 space-y-2">
-                     {chats.map(chat => (
-                       <div 
-                         key={chat.id}
-                         className={`rounded-lg overflow-hidden cursor-pointer ${
-                           selectedChat === chat.id ? 'bg-gray-700' : 'bg-gray-800 hover:bg-gray-700'
-                         }`}
-                         onClick={() => setSelectedChat(chat.id)}
-                       >
-                         {editingChatId === chat.id ? (
-                           <div className="p-3 space-y-2">
-                             <input
-                               type="text"
-                               value={newMemoryTitle || chat.title}
-                               onChange={(e) => setNewMemoryTitle(e.target.value)}
-                               className="w-full bg-gray-700 rounded px-2 py-1 text-sm"
-                               placeholder="Chat Title"
-                             />
-                             <div className="flex justify-end gap-2">
-                               <button
-                                 onClick={(e) => {
-                                   e.stopPropagation();
-                                   handleSaveChat(chat.id);
-                                 }}
-                                 className="text-xs px-2 py-1 bg-blue-600 rounded hover:bg-blue-500"
-                               >
-                                 <Save size={12} />
-                               </button>
-                             </div>
-                           </div>
-                         ) : (
-                           <div className="p-3">
-                             <div className="flex justify-between items-center">
-                               <h3 className="font-medium">{chat.title}</h3>
-                               <div className="flex gap-1">
-                                 <button
-                                   onClick={(e) => {
-                                     e.stopPropagation();
-                                     setEditingChatId(chat.id);
-                                     setNewMemoryTitle(chat.title);
-                                   }}
-                                   className="p-1 hover:bg-gray-600 rounded"
-                                 >
-                                   <Edit2 size={12} />
-                                 </button>
-                                 <button
-                                   onClick={(e) => {
-                                     e.stopPropagation();
-                                     handleDeleteChat(chat.id);
-                                   }}
-                                   className="p-1 hover:bg-gray-600 rounded text-red-500"
-                                 >
-                                   <Trash2 size={12} />
-                                 </button>
-                               </div>
-                             </div>
-                             <div className="text-xs text-gray-400 mt-1">
-                               {chat.messages.length} messages
-                             </div>
-                             <div className="text-xs text-gray-500 mt-1">{chat.timestamp}</div>
-                           </div>
-                         )}
-                       </div>
-                     ))}
-                   </div>
-                 </div>
-               </>
-              )}
+            <div className="flex items-center gap-2">
               <button 
-                onClick={() => setLeftPanelCollapsed(!leftPanelCollapsed)}
-                className="absolute left-80 top-1/2 -translate-y-1/2 bg-gray-800 p-1 rounded-r"
+                onClick={() => setMode('chat')}
+                className={`px-4 py-1 rounded ${
+                  mode === 'chat' ? 'bg-blue-600' : 'bg-gray-700 hover:bg-gray-600'
+                }`}
               >
-                {leftPanelCollapsed ? <ChevronRight size={20} /> : <ChevronLeft size={20} />}
+                Chat Mode
+              </button>
+              <button 
+                onClick={() => setMode('finetune')}
+                className={`px-4 py-1 rounded ${
+                  mode === 'finetune' ? 'bg-blue-600' : 'bg-gray-700 hover:bg-gray-600'
+                }`}
+              >
+                Fine-tune Mode
+              </button>
+              <button 
+                onClick={() => setMode('autonomous')}
+                className={`px-4 py-1 rounded ${
+                  mode === 'autonomous' ? 'bg-blue-600' : 'bg-gray-700 hover:bg-gray-600'
+                }`}
+              >
+                Autonomous Mode
               </button>
             </div>
-          </>
-        )}
 
-        {/* Center Panel */}
-        <div className="flex-1 flex flex-col bg-gray-900">
-          {mode === 'chat' ? (
-            <>
-              <div className="flex-1 overflow-y-auto p-4">
-                <div className="max-w-3xl mx-auto space-y-4">
-                  {currentChat?.messages.map((msg, index) => (
-                    <MessageCard
-                      key={index}
-                      message={msg}
-                      type={msg.type}
-                      onEdit={(text) => handleMessageEdit(currentChat.id, index, text)}
-                      onRetry={() => handleMessageRetry(index)}
-                      onRate={(rating) => handleMessageRate(index, rating)}
-                      onSpeak={() => handleMessageSpeak(msg.content)}
-                    />
-                  ))}
+            <div className="flex items-center gap-4">
+              <select className="bg-gray-700 rounded px-2 py-1">
+                <option>DarkIdol-Llama-3_1</option>
+              </select>
+              
+              <button 
+                onClick={() => setSystemRunning(!systemRunning)}
+                className={`flex items-center gap-2 px-3 py-1 rounded ${
+                  systemRunning ? 'bg-red-600 hover:bg-red-700' : 'bg-green-600 hover:bg-green-700'
+                }`}
+              >
+                {systemRunning ? <Square size={16} /> : <PlayCircle size={16} />}
+                {systemRunning ? 'Stop' : 'Start'}
+              </button>
+            </div>
+          </div>
+
+          {/* Main Container */}
+          <div className="flex flex-1 overflow-hidden">
+            {mode !== 'autonomous' && (
+              <>
+                {/* Left Panel */}
+                <div className={`flex flex-col border-r border-gray-700 transition-all duration-300 ${
+                  leftPanelCollapsed ? 'w-0' : 'w-80'
+                }`}>
+                  {!leftPanelCollapsed && (
+                    <>
+                    <div className="h-1/2 border-b border-gray-700">
+                      <div className="p-2 bg-gray-800 text-white flex justify-between items-center">
+                        <span>Memory Bank</span>
+                        <button 
+                          onClick={handleAddMemory}
+                          className="p-1 hover:bg-gray-700 rounded"
+                        >
+                          <Plus size={16} />
+                        </button>
+                      </div>
+                      <div className="overflow-y-auto p-2 space-y-2">
+                        {memories.map(memory => (
+                          <div key={memory.id} className="bg-gray-800 rounded-lg overflow-hidden">
+                            {editingMemoryId === memory.id ? (
+                              <div className="p-3 space-y-2">
+                                <input
+                                  type="text"
+                                  value={newMemoryTitle || memory.title}
+                                  onChange={(e) => setNewMemoryTitle(e.target.value)}
+                                  className="w-full bg-gray-700 rounded px-2 py-1 text-sm"
+                                  placeholder="Memory Title"
+                                />
+                                <textarea
+                                  value={newMemoryContent || memory.content}
+                                  onChange={(e) => setNewMemoryContent(e.target.value)}
+                                  className="w-full bg-gray-700 rounded px-2 py-1 text-sm"
+                                  rows={3}
+                                  placeholder="Memory Content"
+                                />
+                                <div className="flex justify-end gap-2">
+                                  <button
+                                    onClick={() => handleSaveMemory(memory.id)}
+                                    className="text-xs px-2 py-1 bg-blue-600 rounded hover:bg-blue-500"
+                                  >
+                                    <Save size={12} />
+                                  </button>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="p-3">
+                                <div className="flex justify-between items-start mb-1">
+                                  <h3 className="font-medium">{memory.title}</h3>
+                                  <div className="flex gap-1">
+                                    <button
+                                      onClick={() => {
+                                        setEditingMemoryId(memory.id);
+                                        setNewMemoryTitle(memory.title);
+                                        setNewMemoryContent(memory.content);
+                                      }}
+                                      className="p-1 hover:bg-gray-700 rounded"
+                                    >
+                                      <Edit2 size={12} />
+                                    </button>
+                                    <button
+                                      onClick={() => handleDeleteMemory(memory.id)}
+                                      className="p-1 hover:bg-gray-700 rounded text-red-500"
+                                    >
+                                      <Trash2 size={12} />
+                                    </button>
+                                  </div>
+                                </div>
+                                <p className="text-sm text-gray-400 line-clamp-2">{memory.content}</p>
+                                <div className="text-xs text-gray-500 mt-1">{memory.timestamp}</div>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="h-1/2">
+                      <div className="p-2 bg-gray-800 text-white flex justify-between items-center">
+                        <span>Chats</span>
+                        <div className="flex gap-1">
+                          <button
+                            onClick={handleAddChat}
+                            className="p-1 hover:bg-gray-700 rounded"
+                          >
+                            <Plus size={16} />
+                          </button>
+                          <button className="p-1 hover:bg-gray-700 rounded">
+                            <MoreVertical size={16} />
+                          </button>
+                        </div>
+                      </div>
+                      <div className="overflow-y-auto p-2 space-y-2">
+                        {chats.map(chat => (
+                          <div 
+                            key={chat.id}
+                            className={`rounded-lg overflow-hidden cursor-pointer ${
+                              selectedChat === chat.id ? 'bg-gray-700' : 'bg-gray-800 hover:bg-gray-700'
+                            }`}
+                            onClick={() => setSelectedChat(chat.id)}
+                          >
+                            {editingChatId === chat.id ? (
+                              <div className="p-3 space-y-2">
+                                <input
+                                  type="text"
+                                  value={newMemoryTitle || chat.title}
+                                  onChange={(e) => setNewMemoryTitle(e.target.value)}
+                                  className="w-full bg-gray-700 rounded px-2 py-1 text-sm"
+                                  placeholder="Chat Title"
+                                />
+                                <div className="flex justify-end gap-2">
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleSaveChat(chat.id);
+                                    }}
+                                    className="text-xs px-2 py-1 bg-blue-600 rounded hover:bg-blue-500"
+                                  >
+                                    <Save size={12} />
+                                  </button>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="p-3">
+                                <div className="flex justify-between items-center">
+                                  <h3 className="font-medium">{chat.title}</h3>
+                                  <div className="flex gap-1">
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setEditingChatId(chat.id);
+                                        setNewMemoryTitle(chat.title);
+                                      }}
+                                      className="p-1 hover:bg-gray-600 rounded"
+                                    >
+                                      <Edit2 size={12} />
+                                    </button>
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleDeleteChat(chat.id);
+                                      }}
+                                      className="p-1 hover:bg-gray-600 rounded text-red-500"
+                                    >
+                                      <Trash2 size={12} />
+                                    </button>
+                                  </div>
+                                </div>
+                                <div className="text-xs text-gray-400 mt-1">
+                                  {chat.messages.length} messages
+                                </div>
+                                <div className="text-xs text-gray-500 mt-1">{chat.timestamp}</div>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </>
+                  )}
+                  <button 
+                    onClick={() => setLeftPanelCollapsed(!leftPanelCollapsed)}
+                    className="absolute left-80 top-1/2 -translate-y-1/2 bg-gray-800 p-1 rounded-r"
+                  >
+                    {leftPanelCollapsed ? <ChevronRight size={20} /> : <ChevronLeft size={20} />}
+                  </button>
                 </div>
-              </div>
-              <div className="p-4 border-t border-gray-700 bg-gray-800">
-                <div className="max-w-3xl mx-auto">
-                  <div className="flex gap-2">
-                    <button className="p-2 bg-gray-700 rounded hover:bg-gray-600">
-                      <Mic size={20} />
-                    </button>
-                    <input 
-                      type="text" 
-                      className="flex-1 bg-gray-700 rounded px-4 py-2" 
-                      placeholder="Type your message..."
-                    />
-                    <button className="px-4 py-2 bg-blue-600 rounded hover:bg-blue-500">
-                      Send
-                    </button>
+              </>
+            )}
+
+            {/* Center Panel */}
+            <div className="flex-1 flex flex-col bg-gray-900">
+              {mode === 'chat' ? (
+                <>
+                  <div className="flex-1 overflow-y-auto p-4">
+                    <div className="max-w-3xl mx-auto space-y-4">
+                      {currentChat?.messages.map((msg, index) => (
+                        <MessageCard
+                          key={index}
+                          message={msg}
+                          type={msg.type}
+                          onEdit={(text) => handleMessageEdit(currentChat.id, index, text)}
+                          onRetry={() => handleMessageRetry(index)}
+                          onRate={(rating) => handleMessageRate(index, rating)}
+                          onSpeak={() => handleMessageSpeak(msg.content)}
+                        />
+                      ))}
+                    </div>
                   </div>
-                </div>
-              </div>
-            </>
-          ) : mode === 'finetune' ? (
-            <FineTuningPanel
-              onStartTraining={handleStartTraining}
-              onStopTraining={handleStopTraining}
-              onUploadDataset={handleUploadDataset}
-            />
-          ) : (
-            <AutonomousInterface />
-          )}
-        </div>
-
-        {mode !== 'autonomous' && (
-          <>
-            {/* Right Panel */}
-            <div className={`flex flex-col border-l border-gray-700 transition-all duration-300 ${
-              rightPanelCollapsed ? 'w-0' : 'w-80'
-            }`}>
-              {!rightPanelCollapsed && (
-                <div className="p-4 overflow-y-auto">
-                  <ModelControls
-                    settings={modelSettings}
-                    onSettingsChange={setModelSettings}
-                  />
-                </div>
+                  <div className="p-4 border-t border-gray-700 bg-gray-800">
+                    <div className="max-w-3xl mx-auto">
+                      <div className="flex gap-2">
+                        <button className="p-2 bg-gray-700 rounded hover:bg-gray-600">
+                          <Mic size={20} />
+                        </button>
+                        <input 
+                          type="text" 
+                          className="flex-1 bg-gray-700 rounded px-4 py-2" 
+                          placeholder="Type your message..."
+                        />
+                        <button className="px-4 py-2 bg-blue-600 rounded hover:bg-blue-500">
+                          Send
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </>
+              ) : mode === 'finetune' ? (
+                <FineTuningPanel
+                  onStartTraining={handleStartTraining}
+                  onStopTraining={handleStopTraining}
+                  onUploadDataset={handleUploadDataset}
+                />
+              ) : (
+                <AutonomousInterface />
               )}
-              <button 
-                onClick={() => setRightPanelCollapsed(!rightPanelCollapsed)}
-                className="absolute right-80 top-1/2 -translate-y-1/2 bg-gray-800 p-1 rounded-l"
-              >
-                {rightPanelCollapsed ? <ChevronLeft size={20} /> : <ChevronRight size={20} />}
-              </button>
             </div>
-          </>
-        )}
-      </div>
 
-      {/* Bottom Metrics Bar */}
-      {mode !== 'autonomous' && <MetricsBar />}
-      {process.env.NODE_ENV === 'development' && <DebugPanel />}
-    </div>
+            {mode !== 'autonomous' && (
+              <>
+                {/* Right Panel */}
+                <div className={`flex flex-col border-l border-gray-700 transition-all duration-300 ${
+                  rightPanelCollapsed ? 'w-0' : 'w-80'
+                }`}>
+                  {!rightPanelCollapsed && (
+                    <div className="p-4 overflow-y-auto">
+                      <ModelControls
+                        settings={modelSettings}
+                        onSettingsChange={setModelSettings}
+                      />
+                    </div>
+                  )}
+                  <button 
+                    onClick={() => setRightPanelCollapsed(!rightPanelCollapsed)}
+                    className="absolute right-80 top-1/2 -translate-y-1/2 bg-gray-800 p-1 rounded-l"
+                  >
+                    {rightPanelCollapsed ? <ChevronLeft size={20} /> : <ChevronRight size={20} />}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+
+          {/* Bottom Metrics Bar */}
+          {mode !== 'autonomous' && <MetricsBar />}
+          {process.env.NODE_ENV === 'development' && <DebugPanel />}
+        </div>
+      </ModelProvider>
+    </LoadingProvider>
   );
 }
 

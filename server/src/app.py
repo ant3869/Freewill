@@ -8,7 +8,10 @@ from src.services.websocket_server import socketio, websocket_manager
 from src.llm.engine import LLMEngine
 from src.utils.logger import setup_logger
 from src.utils.error_handler import setup_error_handlers
-
+from src.api.analytics_routes import analytics_api
+from src.api.system_routes import system_api
+from src.api.memory_routes import memory_api
+from src.api.metrics_routes import metrics_api
 
 logger = setup_logger(__name__)
 
@@ -29,6 +32,10 @@ def create_app():
 
     # Register error handlers
     setup_error_handlers(app)
+    app.register_blueprint(analytics_api)
+    app.register_blueprint(system_api)
+    app.register_blueprint(memory_api)
+    app.register_blueprint(metrics_api)
     
     # Initialize LLM engine
     llm_engine = None  # Initialize when needed

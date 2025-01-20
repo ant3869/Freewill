@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { MessageSquare, Edit2, RefreshCw, ThumbsUp, ThumbsDown, Volume2 } from 'lucide-react';
+import { Edit2, RefreshCw, ThumbsUp, ThumbsDown, Volume2 } from 'lucide-react';
 
 interface Message {
   content: string;
@@ -19,7 +19,7 @@ const MessageCard: React.FC<MessageCardProps> = ({
   message, 
   type, 
   onEdit, 
-  onRetry, 
+  onRetry = () => {}, 
   onRate, 
   onSpeak 
 }) => {
